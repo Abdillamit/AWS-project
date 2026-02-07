@@ -161,6 +161,15 @@ export class PipelineStack extends cdk.Stack {
       }),
     });
 
+    // Дать права для чтения CloudFormation stacks
+    webBuildProject.addToRolePolicy(new cdk.aws_iam.PolicyStatement({
+      actions: ['cloudformation:DescribeStacks'],
+      resources: [
+        `arn:aws:cloudformation:${this.region}:${this.account}:stack/${stagify(stage, 'MyServiceAPIStack')}/*`,
+        `arn:aws:cloudformation:${this.region}:${this.account}:stack/${stagify(stage, 'MyServiceAuthStack')}/*`,
+      ],
+    }));
+
     // CodeBuild project для деплоя Infrastructure
     const infraDeployProject = new codebuild.PipelineProject(this, 'InfraDeploy', {
       projectName: stagify(stage, 'MyProject-Infra-Deploy'),
