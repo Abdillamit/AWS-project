@@ -1,0 +1,100 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - beta
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  test-infrastructure:
+    name: Test Infrastructure
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: my-project-infrastructure/package-lock.json
+
+      - name: Install dependencies
+        working-directory: my-project-infrastructure
+        run: npm ci
+
+      - name: Build
+        working-directory: my-project-infrastructure
+        run: npm run build
+
+      - name: Run tests
+        working-directory: my-project-infrastructure
+        run: npm test
+
+      - name: CDK Synth
+        working-directory: my-project-infrastructure
+        run: npx cdk synth
+
+  test-api:
+    name: Test API
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: my-project-api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: my-project-api
+        run: npm ci
+
+      - name: Build
+        working-directory: my-project-api
+        run: npm run build
+
+      - name: Run tests
+        working-directory: my-project-api
+        run: npm test
+
+  test-web:
+    name: Test Web
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: my-project-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: my-project-web
+        run: npm ci --legacy-peer-deps
+
+      - name: Run tests
+        working-directory: my-project-web
+        run: npm test
+
+      - name: Build
+        working-directory: my-project-web
+        env:
+          GATSBY_GRAPHQL_ENDPOINT: https://example.com/graphql
+          GATSBY_API_KEY: test-key
+          GATSBY_STAGE: test
+        run: npm run build

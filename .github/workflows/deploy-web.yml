@@ -1,0 +1,162 @@
+name: Deploy Web
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+    paths:
+      - 'my-project-web/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  NODE_VERSION: '20'
+
+jobs:
+  test-and-build:
+    name: Test and Build Web
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: my-project-web/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Determine stage
+        id: stage
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "stage=prod" >> $GITHUB_OUTPUT
+            echo "stack_prefix=" >> $GITHUB_OUTPUT
+            echo "gatsby_stage=prod" >> $GITHUB_OUTPUT
+          else
+            echo "stage=beta" >> $GITHUB_OUTPUT
+            echo "stack_prefix=beta" >> $GITHUB_OUTPUT
+            echo "gatsby_stage=beta" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get API configuration
+        id: api_config
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`GraphQLApiUrl`].OutputValue' \
+            --output text)
+          
+          API_KEY=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`GraphQLApiKey`].OutputValue' \
+            --output text)
+          
+          USER_POOL_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAuthStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' \
+            --output text)
+          
+          USER_POOL_CLIENT_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAuthStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`UserPoolClientId`].OutputValue' \
+            --output text)
+          
+          IDENTITY_POOL_ID=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAuthStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`IdentityPoolId`].OutputValue' \
+            --output text)
+          
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+          echo "user_pool_id=$USER_POOL_ID" >> $GITHUB_OUTPUT
+          echo "user_pool_client_id=$USER_POOL_CLIENT_ID" >> $GITHUB_OUTPUT
+          echo "identity_pool_id=$IDENTITY_POOL_ID" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        working-directory: my-project-web
+        run: npm ci --legacy-peer-deps
+
+      - name: Run tests
+        working-directory: my-project-web
+        run: npm test
+
+      - name: Build
+        working-directory: my-project-web
+        env:
+          GATSBY_GRAPHQL_ENDPOINT: ${{ steps.api_config.outputs.api_url }}
+          GATSBY_API_KEY: ${{ steps.api_config.outputs.api_key }}
+          GATSBY_STAGE: ${{ steps.stage.outputs.gatsby_stage }}
+          GATSBY_USER_POOL_ID: ${{ steps.api_config.outputs.user_pool_id }}
+          GATSBY_USER_POOL_CLIENT_ID: ${{ steps.api_config.outputs.user_pool_client_id }}
+          GATSBY_IDENTITY_POOL_ID: ${{ steps.api_config.outputs.identity_pool_id }}
+          GATSBY_AWS_REGION: ${{ env.AWS_REGION }}
+        run: npm run build
+
+      - name: Deploy to S3
+        working-directory: my-project-web
+        run: |
+          if [[ "${{ steps.stage.outputs.stage }}" == "prod" ]]; then
+            BUCKET_NAME="my-project-web"
+          else
+            BUCKET_NAME="beta-my-project-web"
+          fi
+          
+          # Create bucket if it doesn't exist
+          aws s3 mb s3://$BUCKET_NAME --region ${{ env.AWS_REGION }} || true
+          
+          # Enable static website hosting
+          aws s3 website s3://$BUCKET_NAME \
+            --index-document index.html \
+            --error-document 404.html
+          
+          # Sync files
+          aws s3 sync public/ s3://$BUCKET_NAME --delete
+          
+          # Set bucket policy for public read
+          aws s3api put-bucket-policy \
+            --bucket $BUCKET_NAME \
+            --policy "{
+              \"Version\": \"2012-10-17\",
+              \"Statement\": [{
+                \"Sid\": \"PublicReadGetObject\",
+                \"Effect\": \"Allow\",
+                \"Principal\": \"*\",
+                \"Action\": \"s3:GetObject\",
+                \"Resource\": \"arn:aws:s3:::$BUCKET_NAME/*\"
+              }]
+            }"
+          
+          echo "bucket_name=$BUCKET_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create deployment summary
+        run: |
+          if [[ "${{ steps.stage.outputs.stage }}" == "prod" ]]; then
+            BUCKET_NAME="my-project-web"
+          else
+            BUCKET_NAME="beta-my-project-web"
+          fi
+          
+          WEBSITE_URL="http://$BUCKET_NAME.s3-website-${{ env.AWS_REGION }}.amazonaws.com"
+          
+          echo "## 🚀 Web Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Stage:** ${{ steps.stage.outputs.stage }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Website URL:** $WEBSITE_URL" >> $GITHUB_STEP_SUMMARY
+          echo "**S3 Bucket:** $BUCKET_NAME" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration:" >> $GITHUB_STEP_SUMMARY
+          echo "- API URL: ${{ steps.api_config.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- User Pool: ${{ steps.api_config.outputs.user_pool_id }}" >> $GITHUB_STEP_SUMMARY

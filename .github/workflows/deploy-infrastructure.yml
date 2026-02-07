@@ -1,0 +1,106 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+      - beta
+    paths:
+      - 'my-project-infrastructure/**'
+      - '.github/workflows/deploy-infrastructure.yml'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  NODE_VERSION: '20'
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: my-project-infrastructure/package-lock.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install dependencies
+        working-directory: my-project-infrastructure
+        run: npm ci
+
+      - name: Build
+        working-directory: my-project-infrastructure
+        run: npm run build
+
+      - name: Run tests
+        working-directory: my-project-infrastructure
+        run: npm test
+
+      - name: Determine stage
+        id: stage
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "stage=prod" >> $GITHUB_OUTPUT
+            echo "stack_prefix=" >> $GITHUB_OUTPUT
+          else
+            echo "stage=beta" >> $GITHUB_OUTPUT
+            echo "stack_prefix=beta" >> $GITHUB_OUTPUT
+          fi
+
+      - name: CDK Diff
+        working-directory: my-project-infrastructure
+        run: |
+          npx cdk diff ${{ steps.stage.outputs.stack_prefix }}MyServiceStorageStack \
+                       ${{ steps.stage.outputs.stack_prefix }}MyServiceAuthStack \
+                       ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack
+
+      - name: Deploy to AWS
+        working-directory: my-project-infrastructure
+        run: |
+          npx cdk deploy ${{ steps.stage.outputs.stack_prefix }}MyServiceStorageStack \
+                         ${{ steps.stage.outputs.stack_prefix }}MyServiceAuthStack \
+                         ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack \
+                         --require-approval never
+
+      - name: Get stack outputs
+        id: outputs
+        working-directory: my-project-infrastructure
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`GraphQLApiUrl`].OutputValue' \
+            --output text)
+          
+          API_KEY=$(aws cloudformation describe-stacks \
+            --stack-name ${{ steps.stage.outputs.stack_prefix }}MyServiceAPIStack \
+            --query 'Stacks[0].Outputs[?OutputKey==`GraphQLApiKey`].OutputValue' \
+            --output text)
+          
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "api_key=$API_KEY" >> $GITHUB_OUTPUT
+
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Stage:** ${{ steps.stage.outputs.stage }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**GraphQL API URL:** ${{ steps.outputs.api_url }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployed Stacks:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Storage Stack" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Auth Stack" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ API Stack" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,35 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - npm install --legacy-peer-deps
+    runtime-versions:
+      nodejs: 20
+
+  build:
+    commands:
+      - npm run build
+      - npm test
+
+  post_build:
+    commands:
+      - echo "Build completed successfully"
+      # Add S3 deployment command here if needed
+      # - aws s3 sync public/ s3://your-bucket-name --delete
+
+cache:
+  paths:
+    - node_modules/**/*
+
+reports:
+  jest_reports:
+    files:
+      - jest-report.xml
+    file-format: JUNITXML
+    base-directory: coverage
+
+artifacts:
+  base-directory: public
+  files:
+    - '**/*'

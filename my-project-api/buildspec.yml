@@ -1,0 +1,41 @@
+version: 0.2
+
+env:
+  secrets-manager:
+    GITHUB_TOKEN: arn:aws:secretsmanager:us-west-2:YOUR_ACCOUNT:secret:GithubToken
+
+phases:
+  install:
+    commands:
+      - npm install
+    runtime-versions:
+      nodejs: 22
+
+  build:
+    commands:
+      - npm run build
+      - npm run test
+
+  post_build:
+    commands:
+      - npm prune --omit=dev
+
+artifacts:
+  base-directory: dist
+  files:
+    - '**/*.js'
+    - '../node_modules/**/*'
+  exclude-paths:
+    - '../coverage'
+    - '../node_modules/@types/**/*'
+
+cache:
+  paths:
+    - node_modules/**/*
+
+reports:
+  jest_reports:
+    files:
+      - jest-report.xml
+    file-format: JUNITXML
+    base-directory: coverage

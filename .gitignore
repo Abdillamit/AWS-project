@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+.nyc_output
+
+# Production
+build/
+dist/
+cdk.out/
+
+# Misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# AWS
+.aws-sam/
+
+# Gatsby
+.cache/
+public/
+
+# TypeScript
+*.tsbuildinfo
+
+# Credentials (ВАЖНО!)
+AWS_CICD_CREDENTIALS.txt
+SETUP_GITHUB_MANUAL.md
+setup-github.sh
+*.pem
+*.key
+
+# AWS CLI
+awscliv2.zip
+aws/
