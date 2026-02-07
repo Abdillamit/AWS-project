@@ -134,7 +134,7 @@ export class PipelineStack extends cdk.Stack {
             },
             commands: [
               'cd my-project-web',
-              'npm ci --legacy-peer-deps',
+              'npm install',
             ],
           },
           pre_build: {
